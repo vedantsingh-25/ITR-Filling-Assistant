@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gross Income Tax Calculator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        /* Custom styling for the input spinner arrows (to hide them) */
+        input[type='number']::-webkit-inner-spin-button,
+        input[type='number']::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type='number'] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 flex justify-center items-start pt-10">
+
+    <!-- Main Calculator Container -->
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-6 md:p-10 space-y-8">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-center border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-gray-800 flex items-center">
+                <span class="mr-3 text-blue-600">📈</span> Income Tax Calculator
+            </h1>
+            <button
+                id="reset-button"
+                class="p-2 text-sm text-gray-500 hover:text-gray-700 transition duration-150 rounded-full hover:bg-gray-50 flex items-center"
+                title="Reset"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.75l-2.91-2.91"/></svg>
+                Reset
+            </button>
+        </div>
+
+        <!-- Input Section -->
+        <div class="space-y-6">
+            <!-- Annual Income Input -->
+            <div class="flex flex-col space-y-2">
+                <label for="annual-income" class="text-sm font-medium text-gray-700">Annual Taxable Income (₹)</label>
+                <div class="relative">
+                    <span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-semibold text-lg">₹</span>
+                    <input
+                        type="number"
+                        id="annual-income"
+                        min="0"
+                        step="1000"
+                        value="500000"
+                        class="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 text-lg font-mono text-right"
+                        placeholder="Enter Annual Income"
+                    />
+                </div>
+            </div>
+
+            <!-- Regime Toggle -->
+            <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                <h3 class="text-lg font-semibold text-gray-800 mb-2 sm:mb-0">Choose Regime:</h3>
+                <div class="flex space-x-3 w-full sm:w-auto">
+                    <button
+                        id="regime-new"
+                        data-regime="new"
+                        class="flex-1 px-4 py-2 rounded-lg font-medium transition duration-200 border-2 bg-green-100 border-green-600 text-green-800 shadow-md hover:bg-green-200"
+                    >
+                        New Regime
+                    </button>
+                    <button
+                        id="regime-old"
+                        data-regime="old"
+                        class="flex-1 px-4 py-2 rounded-lg font-medium transition duration-200 border-2 bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
+                    >
+                        Old Regime
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Results Summary Grid -->
+        <div id="results-summary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Cards will be populated here by JS -->
+        </div>
+
+        <!-- Detailed Breakdown -->
+        <div class="bg-gray-50 p-6 rounded-xl shadow-inner space-y-4">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Tax Breakdown</h3>
+            
+            <div id="breakdown-details" class="space-y-2">
+                <!-- Details will be populated here by JS -->
+            </div>
+
+            <div class="flex justify-between pt-3 border-t-2 border-gray-200">
+                <span class="text-lg font-bold text-gray-800">Total Income Tax Payable</span>
+                <span id="total-tax-payable" class="text-xl font-extrabold text-green-600">₹ 0</span>
+            </div>
+        </div>
+
+        <!-- Disclaimer -->
+        <div class="flex items-start p-3 text-sm rounded-lg bg-yellow-50 text-yellow-800 border border-yellow-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mt-0.5 flex-shrink-0 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <p id="disclaimer-text" class="font-medium">Disclaimer text will be populated based on regime.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Tax Slab Definitions (Simplified for demonstration) ---
+        const TAX_SLABS = {
+            // Slabs for individuals < 60 years
+            old: [
+                { limit: 250000, rate: 0, baseTax: 0 },
+                { limit: 500000, rate: 0.05, baseTax: 0 },
+                { limit: 1000000, rate: 0.20, baseTax: 12500 },
+                { limit: Infinity, rate: 0.30, baseTax: 112500 },
+            ],
+            // New Regime Slabs (Effective from FY 2023-24)
+            new: [
+                { limit: 300000, rate: 0, baseTax: 0 },
+                { limit: 600000, rate: 0.05, baseTax: 0 },
+                { limit: 900000, rate: 0.10, baseTax: 15000 },
+                { limit: 1200000, rate: 0.15, baseTax: 45000 },
+                { limit: 1500000, rate: 0.20, baseTax: 90000 },
+                { limit: Infinity, rate: 0.30, baseTax: 150000 },
+            ],
+        };
+
+        const CESS_RATE = 0.04; // 4% Health and Education Cess
+
+        // --- Utility Functions ---
+
+        /**
+         * Formats a number to the Indian Rupee standard with '₹' symbol.
+         * @param {number} amount - The amount to format.
+         * @returns {string} The formatted currency string.
+         */
+        function formatCurrency(amount) {
+            if (isNaN(amount)) return '₹ 0';
+            const formatter = new Intl.NumberFormat('en-IN', {
+                style: 'currency',
+                currency: 'INR',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+            });
+            return formatter.format(Math.round(amount));
+        }
+        
+        /**
+         * Helper function to create an HTML element.
+         */
+        function createElement(tag, className, content = '') {
+            const el = document.createElement(tag);
+            el.className = className;
+            if (content) el.innerHTML = content;
+            return el;
+        }
+
+
+        // --- Core Calculation Logic ---
+
+        /**
+         * Calculates the total income tax based on the regime and annual income.
+         * @param {number} annualIncome - The total taxable income.
+         * @param {'new' | 'old'} regime - The tax regime to use.
+         * @returns {{taxBeforeCess: number, totalTax: number, effectiveRate: number, rebate: number, cess: number}}
+         */
+        function calculateTax(annualIncome, regime) {
+            const slabs = TAX_SLABS[regime] || TAX_SLABS.new;
+            let taxBeforeCess = 0;
+            let taxableIncome = annualIncome;
+
+            // 1. Calculate Taxable Income based on Slabs
+            for (let i = 0; i < slabs.length; i++) {
+                const slab = slabs[i];
+                const prevLimit = i > 0 ? slabs[i - 1].limit : 0;
+
+                if (taxableIncome > prevLimit) {
+                    const incomeInSlab = Math.min(slab.limit, taxableIncome) - prevLimit;
+                    taxBeforeCess += incomeInSlab * slab.rate;
+                }
+            }
+
+            // 2. Apply Rebate (Section 87A)
+            let rebate = 0;
+            if (regime === 'new' && annualIncome <= 700000) {
+                // Rebate up to ₹25,000
+                rebate = Math.min(taxBeforeCess, 25000);
+            } else if (regime === 'old' && annualIncome <= 500000) {
+                // Rebate up to ₹12,500
+                rebate = Math.min(taxBeforeCess, 12500);
+            }
+            
+            taxBeforeCess -= rebate;
+            taxBeforeCess = Math.max(0, taxBeforeCess); // Ensure tax is not negative
+
+            // 3. Apply Cess (4% on Tax)
+            const cess = taxBeforeCess * CESS_RATE;
+            const totalTax = taxBeforeCess + cess;
+
+            // 4. Calculate Effective Tax Rate
+            const effectiveRate = annualIncome > 0 ? (totalTax / annualIncome) * 100 : 0;
+
+            return {
+                taxBeforeCess: taxBeforeCess,
+                cess: cess,
+                totalTax: totalTax,
+                effectiveRate: effectiveRate,
+                rebate: rebate,
+            };
+        }
+
+
+        // --- UI Update and State Management ---
+
+        let state = {
+            income: 500000,
+            regime: 'new' // 'new' or 'old'
+        };
+
+        // DOM Elements
+        const incomeInput = document.getElementById('annual-income');
+        const newRegimeButton = document.getElementById('regime-new');
+        const oldRegimeButton = document.getElementById('regime-old');
+        const resultsSummary = document.getElementById('results-summary');
+        const breakdownDetails = document.getElementById('breakdown-details');
+        const totalTaxPayable = document.getElementById('total-tax-payable');
+        const disclaimerText = document.getElementById('disclaimer-text');
+        const resetButton = document.getElementById('reset-button');
+        
+        /**
+         * Updates the entire calculator UI based on the current state.
+         */
+        function updateCalculator() {
+            state.income = Math.max(0, Number(incomeInput.value));
+            
+            // 1. Run Calculation
+            const { taxBeforeCess, cess, totalTax, effectiveRate, rebate } = calculateTax(state.income, state.regime);
+            
+            // 2. Update Regime Buttons
+            newRegimeButton.classList.remove('bg-green-100', 'border-green-600', 'text-green-800', 'shadow-md', 'bg-white', 'border-gray-300', 'text-gray-600', 'hover:bg-gray-50');
+            oldRegimeButton.classList.remove('bg-blue-100', 'border-blue-600', 'text-blue-800', 'shadow-md', 'bg-white', 'border-gray-300', 'text-gray-600', 'hover:bg-gray-50');
+
+            if (state.regime === 'new') {
+                newRegimeButton.classList.add('bg-green-100', 'border-green-600', 'text-green-800', 'shadow-md');
+                oldRegimeButton.classList.add('bg-white', 'border-gray-300', 'text-gray-600', 'hover:bg-gray-50');
+            } else {
+                oldRegimeButton.classList.add('bg-blue-100', 'border-blue-600', 'text-blue-800', 'shadow-md');
+                newRegimeButton.classList.add('bg-white', 'border-gray-300', 'text-gray-600', 'hover:bg-gray-50');
+            }
+            
+            // 3. Update Summary Cards
+            resultsSummary.innerHTML = '';
+
+            const resultData = [
+                { 
+                    label: "Total Tax Liability", 
+                    value: formatCurrency(totalTax), 
+                    border: 'border-blue-500', 
+                    text: 'text-blue-600', 
+                    valueText: 'text-blue-800',
+                    icon: '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H18a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="10"/><line x1="9" y1="15" x2="15" y2="15"/></svg>'
+                },
+                { 
+                    label: "Tax Before Cess", 
+                    value: formatCurrency(taxBeforeCess), 
+                    border: 'border-yellow-500', 
+                    text: 'text-yellow-600', 
+                    valueText: 'text-gray-800',
+                    icon: '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+                },
+                { 
+                    label: "Effective Tax Rate", 
+                    value: `${effectiveRate.toFixed(2)} %`, 
+                    border: 'border-purple-500', 
+                    text: 'text-purple-600', 
+                    valueText: 'text-purple-800',
+                    icon: '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+                },
+            ];
+
+            resultData.forEach(data => {
+                const card = createElement('div', `p-4 rounded-xl shadow-lg border-l-4 ${data.border} bg-white transition duration-300 hover:shadow-xl`);
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium ${data.text}">${data.label}</span>
+                        <span class="${data.text}">${data.icon}</span>
+                    </div>
+                    <p class="text-2xl font-bold mt-1 ${data.valueText}">${data.value}</p>
+                `;
+                resultsSummary.appendChild(card);
+            });
+
+            // 4. Update Breakdown Details
+            breakdownDetails.innerHTML = '';
+            
+            const detail = (label, value, className = 'font-medium text-gray-800') => `
+                <div class="flex justify-between py-2 border-b border-gray-100 last:border-b-0">
+                    <span class="text-gray-600 text-sm">${label}</span>
+                    <span class="${className}">${value}</span>
+                </div>
+            `;
+            
+            const grossTax = taxBeforeCess + rebate;
+
+            breakdownDetails.innerHTML += detail("1. Taxable Income", formatCurrency(state.income));
+            breakdownDetails.innerHTML += detail("2. Gross Tax Calculated", formatCurrency(grossTax));
+            
+            const rebateLabel = state.regime === 'new' ? 'Max ₹25,000' : 'Max ₹12,500';
+            breakdownDetails.innerHTML += detail(`3. Rebate u/s 87A (${rebateLabel})`, `- ${formatCurrency(rebate)}`, 'font-medium text-red-500');
+            
+            breakdownDetails.innerHTML += detail("4. Net Tax (2 - 3)", formatCurrency(taxBeforeCess));
+            breakdownDetails.innerHTML += detail("5. Health & Education Cess (4%)", `+ ${formatCurrency(cess)}`);
+
+            // 5. Update Total Payable
+            totalTaxPayable.textContent = formatCurrency(totalTax);
+            
+            // 6. Update Disclaimer
+            if (state.regime === 'new') {
+                disclaimerText.textContent = "New Regime: Simpler structure, fewer exemptions. Taxable income up to ₹7 Lakh is effectively zero due to rebate. The calculator includes a Standard Deduction of ₹50,000 for salaried employees in the New Regime (FY 2023-24 onwards).";
+            } else {
+                disclaimerText.textContent = "Old Regime: Allows for many deductions (80C, HRA, etc.). Calculations here assume NO specific deductions or exemptions (only basic slabs) for direct comparison.";
+            }
+
+            // Save state to localStorage
+            localStorage.setItem('taxCalcState', JSON.stringify(state));
+        }
+
+
+        // --- Event Handlers ---
+
+        function handleRegimeChange(event) {
+            state.regime = event.target.dataset.regime;
+            updateCalculator();
+        }
+        
+        function handleReset() {
+            state.income = 500000;
+            state.regime = 'new';
+            incomeInput.value = state.income;
+            updateCalculator();
+        }
+
+        // --- Initialization ---
+
+        // Load state from localStorage on startup
+        function loadState() {
+            const savedState = localStorage.getItem('taxCalcState');
+            if (savedState) {
+                try {
+                    const parsedState = JSON.parse(savedState);
+                    state.income = parsedState.income || 500000;
+                    state.regime = parsedState.regime || 'new';
+                    incomeInput.value = state.income;
+                } catch (e) {
+                    console.error("Error loading state from localStorage:", e);
+                }
+            }
+            updateCalculator(); // Initial calculation and render
+        }
+
+        // Attach event listeners
+        incomeInput.addEventListener('input', updateCalculator);
+        newRegimeButton.addEventListener('click', handleRegimeChange);
+        oldRegimeButton.addEventListener('click', handleRegimeChange);
+        resetButton.addEventListener('click', handleReset);
+
+        // Run initialization when the window loads
+        window.onload = loadState;
+    </script>
+</body>
+</html>

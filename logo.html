@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReturnEase - Easy Returns</title>
+    
+    <style>
+        /*
+         * COLOR PALETTE:
+         * Primary (Blue/Trust): #005A9C (Deep, refined blue)
+         * Accent (Green/Ease): #5BC85D (Soft, pleasant green)
+         * Background: #F7F9FC (Very soft light blue/white)
+         * Text/Shadow: #495057 (Darker text)
+         */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #F7F9FC; /* Soft light blue/white background */
+            color: #333;
+            overflow: hidden;
+        }
+
+        .logo-container {
+            text-align: center;
+            padding: 50px 60px; /* Slightly more padding */
+            border-radius: 18px;
+            background-color: #fff;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.05); /* Softer shadow for better lift */
+        }
+
+        /* --- LOGO SYMBOL --- */
+        .logo-symbol {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+
+        .logo-r {
+            font-size: 90px; /* Slightly larger R */
+            font-weight: 800;
+            color: #005A9C; /* Deep Refined Blue */
+            position: relative;
+            z-index: 2;
+            display: block;
+            line-height: 1;
+        }
+
+        /* The Swoosh/Arrow element */
+        .logo-swoosh {
+            position: absolute;
+            bottom: 8px; 
+            left: 15px; 
+            width: 70px;
+            height: 10px;
+            background-color: #5BC85D; /* Soft Pleasant Green */
+            border-radius: 5px;
+            transform: rotate(-10deg);
+            opacity: 0; 
+            z-index: 1;
+            transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Smoother transition curve */
+        }
+
+        /* --- BRAND NAME & TAGLINE --- */
+        .brand-name {
+            font-size: 52px;
+            font-weight: 700;
+            margin: 0;
+            color: #005A9C;
+        }
+
+        .tagline {
+            font-family: 'Tahoma', sans-serif;
+            font-size: 19px;
+            color: #495057; /* Darker, professional text */
+            margin-top: 8px;
+            letter-spacing: 2px;
+            opacity: 0; 
+            transition: opacity 1.2s ease-in 0.8s; /* Longer delay and fade */
+        }
+
+        /* Class added by JavaScript to show the tagline */
+        .show-tagline {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="logo-container">
+        <div class="logo-symbol">
+            <span class="logo-r">R</span>
+            <span class="logo-swoosh" id="swoosh"></span>
+        </div>
+
+        <h1 class="brand-name">ReturnEase</h1>
+
+        <p class="tagline">Returns Made Simple.</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const swoosh = document.getElementById('swoosh');
+            const tagline = document.querySelector('.tagline');
+
+            // 1. Animate the Swoosh
+            function animateSwoosh() {
+                // Show the swoosh
+                swoosh.style.opacity = '1';
+
+                // Animate the swoosh moving across and slightly changing shape
+                swoosh.style.width = '85px'; /* Longer stretch */
+                swoosh.style.backgroundColor = '#4CAF50'; /* A slightly darker, richer green on motion */
+
+                // Reset and repeat the animation after a short delay
+                setTimeout(() => {
+                    swoosh.style.width = '70px';
+                    swoosh.style.backgroundColor = '#5BC85D'; // Return to original green
+                }, 500);
+            }
+
+            // 2. Show the Tagline
+            function showTagline() {
+                tagline.classList.add('show-tagline');
+            }
+
+            // Run the animation sequence
+            setTimeout(animateSwoosh, 200); // Start swoosh animation after a slight pause
+            setTimeout(showTagline, 1000); // Show tagline after the swoosh animation finishes
+        });
+    </script>
+</body>
+</html>

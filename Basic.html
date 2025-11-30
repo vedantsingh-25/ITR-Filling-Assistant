@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive ITR Form Selector & Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        // Firebase Imports (Required for Canvas Environment)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // Note: initialAuthToken is used inside onAuthStateChanged logic below
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+
+        let db, auth, userId = 'loading';
+
+        // Set up the ITR details data (ITR-1 to ITR-7)
+        const ITR_DETAILS = [
+            {
+                form: "ITR-1 (Sahaj)",
+                who: "Resident Individual",
+                when: "Total income up to ₹50 Lakh. Income sources: Salary, one House Property, Other Sources (Interest, etc.), and agricultural income up to ₹5,000.",
+                cannot: "Cannot be a Director in a company, cannot hold unlisted equity shares, cannot have income from business or profession, cannot be RNOR or Non-Resident."
+            },
+            {
+                form: "ITR-2",
+                who: "Individual or Hindu Undivided Family (HUF)",
+                when: "Total income is **not** from profits and gains of business or profession. Used if ITR-1 is not applicable (e.g., income > ₹50 Lakh, multiple house properties, capital gains, foreign assets, RNOR/Non-Resident).",
+                cannot: "Cannot have income from profits and gains of business or profession."
+            },
+            {
+                form: "ITR-3",
+                who: "Individual or Hindu Undivided Family (HUF)",
+                when: "Having income from **profits and gains of business or profession** (e.g., running a full-time business, stock market trading as business income).",
+                cannot: "N/A - This is the primary form for business income."
+            },
+            {
+                form: "ITR-4 (Sugam)",
+                who: "Resident Individual, HUF, or Firm (other than LLP)",
+                when: "Total income up to ₹50 Lakh, having income from business and profession computed under the **presumptive taxation scheme** (Section 44AD, 44ADA, or 44AE).",
+                cannot: "Cannot be a Director, cannot hold foreign assets, and cannot have capital gains."
+            },
+            {
+                form: "ITR-5",
+                who: "Firms, Limited Liability Partnerships (LLPs), Association of Persons (AOPs), Body of Individuals (BOIs), etc.",
+                when: "Used by non-individual entities that are not companies or persons filing ITR-7.",
+                cannot: "Cannot be filed by an individual, HUF, or Company."
+            },
+            {
+                form: "ITR-6",
+                who: "Companies (other than those claiming exemption u/s 11)",
+                when: "Mandatory for all companies registered under the Companies Act.",
+                cannot: "Cannot be filed by a company claiming exemption under section 11."
+            },
+            {
+                form: "ITR-7",
+                who: "Persons including Companies",
+                when: "Required to furnish return under sections 139(4A) or 139(4B) or 139(4C) or 139(4D) (e.g., Charitable Trusts, Political Parties, Scientific Research Institutions).",
+                cannot: "N/A - This is for specific trust/institution categories."
+            }
+        ];
+
+        // Quiz State and Questions
+        const QUIZ_QUESTIONS = [
+            {
+                id: 'residency',
+                title: '1. What is your residential status?',
+                options: [
+                    { value: 'resident', text: 'Resident (including R.N.O.R.)' },
+                    { value: 'non_resident', text: 'Non-Resident' },
+                ],
+            },
+            {
+                id: 'business_income',
+                title: '2. Do you have income from "Profits and Gains of Business or Profession"?',
+                options: [
+                    { value: 'no_business', text: 'No, only Salary, Interest, House Rent, or Capital Gains.' },
+                    { value: 'presumptive', text: 'Yes, but I opt for the **Presumptive Taxation Scheme** (e.g., under 44AD/44ADA).' },
+                    { value: 'regular_business', text: 'Yes, I maintain regular books of accounts and do not opt for presumptive scheme.' },
+                ],
+            },
+            {
+                id: 'salary_limit',
+                title: '3. What is your **Total Income**?',
+                condition: (state) => state.residency === 'resident' && state.business_income === 'no_business',
+                options: [
+                    { value: 'below_50L', text: 'Less than or equal to ₹50 Lakh' },
+                    { value: 'above_50L', text: 'More than ₹50 Lakh' },
+                ],
+            },
+            {
+                id: 'complexities',
+                title: '4. Do any of the following apply to you?',
+                condition: (state) => state.residency === 'resident' && state.business_income === 'no_business' && state.salary_limit === 'below_50L',
+                options: [
+                    { value: 'simple', text: 'No (I am NOT a Director, I do NOT hold unlisted equity, I do NOT have more than one house property).' },
+                    { value: 'complex', text: 'Yes (Any of the above applies to me, which disqualifies me from ITR-1).' },
+                ],
+            },
+        ];
+
+        let quizState = {
+            step: 0,
+            answers: {},
+            suggestedITR: null
+        };
+
+        // --- Core Application Functions ---
+        
+        // RENAMED initializeApp to initializeApplication to avoid conflict with imported function
+        async function initializeApplication() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.warn("Firebase config not available. Running in local mode.");
+                } else {
+                    setLogLevel('debug');
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    await new Promise(resolve => {
+                        onAuthStateChanged(auth, async (user) => {
+                            if (user) {
+                                userId = user.uid;
+                                console.log(`Authenticated. User ID: ${userId}`);
+                            } else if (initialAuthToken) {
+                                // Sign in with custom token if available
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                // Sign in anonymously as a fallback
+                                const anonUser = await signInAnonymously(auth);
+                                userId = anonUser.user.uid;
+                                console.log(`Signed in anonymously. User ID: ${userId}`);
+                            }
+                            // Update display with user ID once determined
+                            document.getElementById('user-id-display').textContent = userId;
+                            resolve();
+                        });
+                    });
+                }
+
+                // Render the UI after auth check
+                renderITRDetails();
+                renderQuestion();
+
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+            }
+        }
+
+        function renderITRDetails() {
+            const container = document.getElementById('itr-details-container');
+            if (!container) return;
+
+            container.innerHTML = ITR_DETAILS.map((itr, index) => `
+                <div class="bg-white p-4 rounded-lg shadow-md mb-3 border-l-4 ${index % 2 === 0 ? 'border-indigo-500' : 'border-green-500'}">
+                    <button class="w-full text-left font-bold text-xl text-gray-800 flex justify-between items-center"
+                            onclick="window.toggleDetail('detail-${index}')">
+                        ${itr.form}
+                        <svg id="icon-${index}" class="w-5 h-5 transition-transform duration-300 transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                    <div id="detail-${index}" class="mt-2 text-gray-600 hidden transition-all duration-300 overflow-hidden pt-2 border-t border-gray-200">
+                        <p class="font-semibold mt-2 text-indigo-600">✅ Who Can File:</p>
+                        <p class="ml-2">${itr.who}</p>
+                        <p class="font-semibold mt-2 text-green-600">🗓️ When to File:</p>
+                        <p class="ml-2">${itr.when}</p>
+                        <p class="font-semibold mt-2 text-red-600">❌ Key Restrictions:</p>
+                        <p class="ml-2">${itr.cannot}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.toggleDetail = (id) => {
+            const detail = document.getElementById(id);
+            const index = id.split('-')[1];
+            const icon = document.getElementById(`icon-${index}`);
+
+            if (detail.classList.contains('hidden')) {
+                detail.classList.remove('hidden');
+                icon.classList.add('rotate-90');
+            } else {
+                detail.classList.add('hidden');
+                icon.classList.remove('rotate-90');
+            }
+        };
+
+        window.filterDetails = () => {
+            const input = document.getElementById('search-input');
+            const filter = input.value.toUpperCase();
+            const container = document.getElementById('itr-details-container');
+            // Select all children that are the ITR detail cards
+            const details = container.querySelectorAll('.bg-white.p-4.rounded-lg.shadow-md.mb-3'); 
+
+            details.forEach(detail => {
+                const button = detail.querySelector('button');
+                const contentDiv = detail.querySelector('[id^="detail-"]');
+                const formName = button.textContent || button.innerText;
+                const contentText = contentDiv.textContent || contentDiv.innerText;
+
+                if (formName.toUpperCase().indexOf(filter) > -1 || contentText.toUpperCase().indexOf(filter) > -1) {
+                    detail.style.display = "";
+                } else {
+                    detail.style.display = "none";
+                }
+            });
+        };
+
+        function getCurrentQuestion() {
+            let currentQ = null;
+            let stepIndex = 0;
+            
+            while (stepIndex < QUIZ_QUESTIONS.length) {
+                const q = QUIZ_QUESTIONS[stepIndex];
+                if (!q.condition || q.condition(quizState.answers)) {
+                    currentQ = q;
+                    quizState.step = stepIndex;
+                    return currentQ;
+                }
+                stepIndex++;
+            }
+            // If we fall through, the quiz is complete
+            quizState.step = QUIZ_QUESTIONS.length;
+            return null;
+        }
+
+        function renderQuestion() {
+            const quizContainer = document.getElementById('itr-selector-quiz');
+            quizContainer.innerHTML = '';
+            const currentQ = getCurrentQuestion();
+
+            if (quizState.suggestedITR) {
+                renderResult();
+                return;
+            }
+
+            if (!currentQ) {
+                calculateITR();
+                return;
+            }
+
+            const questionHtml = `
+                <h3 class="text-2xl font-extrabold text-indigo-700 mb-6">${currentQ.title}</h3>
+                <div class="space-y-4">
+                    ${currentQ.options.map(option => `
+                        <button class="w-full text-left p-4 bg-white border border-gray-200 rounded-xl hover:shadow-lg hover:border-indigo-500 transition duration-150 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-indigo-300"
+                                onclick="window.handleAnswer('${currentQ.id}', '${option.value}')">
+                            <span class="font-semibold text-gray-800">${option.text}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+            quizContainer.innerHTML = questionHtml;
+        }
+
+        window.handleAnswer = (questionId, answerValue) => {
+            quizState.answers[questionId] = answerValue;
+            quizState.suggestedITR = null;
+
+            // Check if we reached the end of the logical flow
+            const nextQuestion = getCurrentQuestion();
+            
+            if (nextQuestion === null) {
+                calculateITR();
+            } else {
+                renderQuestion();
+            }
+        };
+
+        function calculateITR() {
+            const { residency, business_income, salary_limit, complexities } = quizState.answers;
+            let resultITR = 'ITR-2'; // Safe default for complex individuals
+
+            // 1. Check for Business/Profession Income
+            if (business_income === 'regular_business') {
+                resultITR = 'ITR-3';
+            } else if (business_income === 'presumptive') {
+                // Presumptive scheme is only for Residents with income up to 50L.
+                if (residency === 'resident' && salary_limit === 'below_50L') {
+                    resultITR = 'ITR-4 (Sugam)';
+                } else {
+                    // If presumptive taxpayer fails ITR-4 criteria, they must file ITR-3
+                    resultITR = 'ITR-3';
+                }
+            }
+            // 2. Check Non-Residents
+            else if (residency === 'non_resident') {
+                // ITR-1/4 is not allowed. They must file ITR-2 (no business) or ITR-3 (with business)
+                resultITR = 'ITR-2'; 
+            }
+            // 3. Check for ITR-1 / ITR-2 (For Residents with no business income)
+            else if (residency === 'resident' && business_income === 'no_business') {
+                if (salary_limit === 'below_50L') {
+                    if (complexities === 'simple') {
+                        // All criteria for ITR-1 met
+                        resultITR = 'ITR-1 (Sahaj)';
+                    } else if (complexities === 'complex') {
+                        // Income below 50L, but complex factors (Director, multiple house properties, capital gains, etc.)
+                        resultITR = 'ITR-2';
+                    }
+                } else if (salary_limit === 'above_50L') {
+                    // Income above 50L, no business income
+                    resultITR = 'ITR-2';
+                }
+            }
+
+            quizState.suggestedITR = resultITR;
+            renderResult();
+        }
+
+        function renderResult() {
+            const quizContainer = document.getElementById('itr-selector-quiz');
+            const result = quizState.suggestedITR;
+            // Find the full detail object using the prefix (ITR-1, ITR-2, etc.)
+            const detail = ITR_DETAILS.find(d => d.form.startsWith(result.split(' ')[0])); 
+
+            let detailHtml = '';
+            if (detail) {
+                detailHtml = `
+                    <div class="mt-6 p-4 border border-indigo-200 bg-indigo-50 rounded-lg shadow-inner">
+                        <p class="font-semibold text-sm text-indigo-700 mb-2">Based on your answers, here are the details for ${detail.form}:</p>
+                        <p class="text-sm"><strong>Who Can File:</strong> ${detail.who}</p>
+                        <p class="text-sm"><strong>Key Restrictions:</strong> <span class="text-red-600">${detail.cannot}</span></p>
+                    </div>
+                `;
+            }
+
+            const resultHtml = `
+                <div class="text-center p-8 bg-white rounded-xl shadow-2xl">
+                    <h2 class="text-3xl font-extrabold text-green-600 mb-4">Your Suggested ITR Form:</h2>
+                    <p class="text-6xl font-black text-indigo-800 animate-pulse">${result}</p>
+                    ${detailHtml}
+                    <button class="mt-8 bg-indigo-600 text-white px-6 py-3 rounded-full font-bold shadow-md hover:bg-indigo-700 transition duration-200"
+                            onclick="window.resetQuiz()">
+                        Start Again
+                    </button>
+                </div>
+            `;
+            quizContainer.innerHTML = resultHtml;
+        }
+
+        window.resetQuiz = () => {
+            quizState.answers = {};
+            quizState.step = 0;
+            quizState.suggestedITR = null;
+            renderQuestion();
+        };
+
+        // Initialize App on Window Load
+        window.addEventListener('load', initializeApplication); // Updated function name
+
+        // Expose functions globally for HTML onclick to work
+        window.handleAnswer = handleAnswer;
+        window.resetQuiz = resetQuiz;
+        window.toggleDetail = toggleDetail;
+        window.filterDetails = filterDetails;
+
+    </script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center py-6 mb-8 bg-white rounded-xl shadow-lg">
+            <h1 class="text-4xl font-black text-indigo-800">ITR Form Selection Assistant 🤖</h1>
+            <p class="text-lg text-gray-600 mt-2">Find the right ITR form (1-7) based on your income details.</p>
+             <p class="text-xs text-gray-400 mt-2">User ID: <span id="user-id-display">Loading...</span></p>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- ITR Selector Quiz Panel -->
+            <section class="lg:col-span-1 bg-indigo-50 p-6 rounded-xl shadow-xl min-h-[400px] flex flex-col">
+                <h2 class="text-3xl font-extrabold text-indigo-900 border-b-2 border-indigo-200 pb-3 mb-6">ITR Selector Quiz</h2>
+                <div id="itr-selector-quiz" class="flex-grow flex items-center justify-center">
+                    <div class="text-center text-gray-500">Loading Quiz...</div>
+                </div>
+            </section>
+
+            <!-- ITR Details Guide Panel -->
+            <section class="lg:col-span-1">
+                <h2 class="text-3xl font-extrabold text-gray-800 border-b-2 border-gray-300 pb-3 mb-6">Detailed ITR Guide (1-7)</h2>
+                <input type="text" id="search-input" onkeyup="window.filterDetails()" placeholder="Search ITR Forms (e.g., ITR-4, Trust, RNOR)"
+                       class="w-full p-3 mb-4 border border-gray-300 rounded-xl shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <div id="itr-details-container" class="space-y-4">
+                    <div class="text-center text-gray-500">Loading Details...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>
